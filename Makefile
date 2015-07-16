@@ -4,4 +4,4 @@ CXXFLAGS=`$(LLVMCONFIG) --cxxflags`
 LDFLAGS=`$(LLVMCONFIG) --system-libs --ldflags --libs all` -lhsail -lLLVMHSAILUtil
 
 all:
-	$(CXX) $(CXXFLAGS) -shared -o libHLC.so test.cpp $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -shared -o libHLC.so hlc.cpp $(LDFLAGS)
