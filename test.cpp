@@ -60,9 +60,11 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
+#include "llvm/AsmParser/Parser.h"
+
 namespace libHLC {
 
-static llvm::LLVMContext *TheContext = 0;
+static llvm::LLVMContext *TheContext = nullptr;
 
 bool DisableInline = false;
 bool UnitAtATime = false;
@@ -74,7 +76,7 @@ bool DisableSimplifyLibCalls = false;
 
 bool OptLevelO1 = false;
 bool OptLevelO2 = false;
-bool OptLevelO3 = false;
+bool OptLevelO3 = true;
 bool OptLevelOz = false;
 bool OptLevelOs = false;
 bool NoVerify = false;
@@ -161,7 +163,7 @@ static TargetMachine* GetTargetMachine(Triple TheTriple) {
 void Initialize() {
   using namespace llvm;
 
-  if ( TheContext == 0 ) {
+  if ( TheContext != nullptr ) {
     // Already initialized
     return;
   }
@@ -297,17 +299,43 @@ using namespace libHLC;
 
 typedef struct OpaqueModule* llvm_module_ptr;
 
-void libHLC_Initialize() {
+void HLC_Initialize() {
   Initialize();
 }
 
-void libHLC_Finalize() {
+void HLC_Finalize() {
   Initialize();
 }
 
-void libHLC_Optimize(llvm_module_ptr module) {
-  llvm::Module *M = reinterpret_cast<llvm::Module*>(module);
-  Optimize(M);
+
+const char* HLC_CreateString(const char *str) {
+    return strdup(str);
+}
+
+void HLC_DisposeString(char *str) {
+  free(str);
+}
+
+int HLC_Optimize(const char* ir_module, const char **output_str) {
+  using namespace llvm;
+
+  // Parse assembly string
+  llvm::SMDiagnostic SM;
+  std::unique_ptr<Module> M = parseAssemblyString(ir_module, SM, *TheContext);
+  if (!M) return 0;
+
+  // Optimize
+  Optimize(M.get());
+
+  // Write output
+  std::string buf;
+  raw_string_ostream os(buf);
+  M->print(os, nullptr);
+  os.flush();
+
+  // Copy string for output
+  *output_str = HLC_CreateString(buf.c_str());
+  return 1;   // Successful
 }
 
 } // end extern "C"
