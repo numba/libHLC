@@ -291,6 +291,133 @@ void Optimize(llvm::Module *M) {
     Passes.run(*M);
 }
 
+static const int OptLevel = 2;
+static const std::string MArch = "hsail64";
+
+// The following function is adapted from llc.cpp
+int CompileModule(Module *mod, raw_string_ostream &os) {
+
+  // LLVMContext &Context = *TheContext;
+  // Load the module to be compiled...
+  SMDiagnostic Err;
+
+  Triple TheTriple;
+
+  TheTriple = Triple(mod->getTargetTriple());
+
+  if (TheTriple.getTriple().empty())
+    TheTriple.setTriple(sys::getDefaultTargetTriple());
+
+  // Get the target specific parser.
+  std::string Error;
+  const Target *TheTarget = TargetRegistry::lookupTarget(MArch, TheTriple,
+                                                         Error);
+  if (!TheTarget) {
+    errs() << Error;
+    return 0;
+  }
+
+  // Package up features to be passed to target/subtarget
+  std::string FeaturesStr;
+  // if (MAttrs.size()) {
+  //   SubtargetFeatures Features;
+  //   for (unsigned i = 0; i != MAttrs.size(); ++i)
+  //     Features.AddFeature(MAttrs[i]);
+  //   FeaturesStr = Features.getString();
+  // }
+
+  CodeGenOpt::Level OLvl = CodeGenOpt::Default;
+
+  switch (OptLevel) {
+  case 0: OLvl = CodeGenOpt::None; break;
+  case 1: OLvl = CodeGenOpt::Less; break;
+  case 2: OLvl = CodeGenOpt::Default; break;
+  case 3: OLvl = CodeGenOpt::Aggressive; break;
+  }
+
+  TargetOptions Options;
+  // TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
+  // Options.DisableIntegratedAS = NoIntegratedAssembler;
+  // Options.MCOptions.ShowMCEncoding = ShowMCEncoding;
+  // Options.MCOptions.MCUseDwarfDirectory = EnableDwarfDirectory;
+  // Options.MCOptions.AsmVerbose = AsmVerbose;
+
+  std::unique_ptr<TargetMachine> target(
+      TheTarget->createTargetMachine(TheTriple.getTriple(), MCPU, FeaturesStr,
+                                     Options, RelocModel, CMModel, OLvl));
+  assert(target.get() && "Could not allocate target machine!");
+  assert(mod && "Should have exited if we didn't have a module!");
+  TargetMachine &Target = *target.get();
+
+  if (GenerateSoftFloatCalls)
+    FloatABIForCalls = FloatABI::Soft;
+
+  // // Figure out where we are going to send the output.
+  // std::unique_ptr<tool_output_file> Out(
+  //     GetOutputStream(TheTarget->getName(), TheTriple.getOS(), argv[0]));
+  // if (!Out) return 1;
+
+  // Build up all of the passes that we want to do to the module.
+  PassManager PM;
+
+  // Add an appropriate TargetLibraryInfo pass for the module's triple.
+  TargetLibraryInfo *TLI = new TargetLibraryInfo(TheTriple);
+  if (DisableSimplifyLibCalls)
+    TLI->disableAllFunctions();
+  PM.add(TLI);
+
+  // Add the target data from the target machine, if it exists, or the module.
+  if (const DataLayout *DL = Target.getSubtargetImpl()->getDataLayout())
+    mod->setDataLayout(DL);
+  PM.add(new DataLayoutPass());
+
+  auto FileType = TargetMachine::CGFT_AssemblyFile;
+
+  // if (RelaxAll.getNumOccurrences() > 0 &&
+  //     FileType != TargetMachine::CGFT_ObjectFile)
+  //   errs() << argv[0]
+  //            << ": warning: ignoring -mc-relax-all because filetype != obj";
+  //
+  // {
+  formatted_raw_ostream FOS(os);
+    //
+    // AnalysisID StartAfterID = nullptr;
+    // AnalysisID StopAfterID = nullptr;
+    // const PassRegistry *PR = PassRegistry::getPassRegistry();
+    // if (!StartAfter.empty()) {
+    //   const PassInfo *PI = PR->getPassInfo(StartAfter);
+    //   if (!PI) {
+    //     errs() << argv[0] << ": start-after pass is not registered.\n";
+    //     return 1;
+    //   }
+    //   StartAfterID = PI->getTypeInfo();
+    // }
+    // if (!StopAfter.empty()) {
+    //   const PassInfo *PI = PR->getPassInfo(StopAfter);
+    //   if (!PI) {
+    //     errs() << argv[0] << ": stop-after pass is not registered.\n";
+    //     return 1;
+    //   }
+    //   StopAfterID = PI->getTypeInfo();
+    // }
+
+    // Ask the target to add backend passes as necessary.
+  if (Target.addPassesToEmitFile(PM, FOS, FileType, NoVerify)) {
+    errs() << "target does not support generation of this"
+           << " file type!\n";
+    return 0;
+  }
+
+  PM.run(*mod);
+  // }
+
+  // Declare success.
+  // Out->keep();
+
+  return 1;
+}
+
+
 } // end libHLC namespace
 
 extern "C" {
@@ -336,6 +463,28 @@ int HLC_Optimize(const char* ir_module, const char **output_str) {
   // Copy string for output
   *output_str = HLC_CreateString(buf.c_str());
   return 1;   // Successful
+}
+
+int HLC_EmitHSAIL(const char *ir_module, const char **output_str) {
+
+    using namespace llvm;
+
+    // Parse assembly string
+    llvm::SMDiagnostic SM;
+    std::unique_ptr<Module> M = parseAssemblyString(ir_module, SM, *TheContext);
+    if (!M) return 0;
+
+    // Compile
+    std::string buf;
+    raw_string_ostream os(buf);
+    if (!CompileModule(M.get(), os)) return 0;
+
+    // Write output
+    os.flush();
+
+    // Copy string for output
+    *output_str = HLC_CreateString(buf.c_str());
+    return 1;   // Successful
 }
 
 } // end extern "C"

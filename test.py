@@ -9,12 +9,17 @@ with open("test_input.ll") as fin:
 
 # print(modtext)
 
-out = c_char_p(0)
+opt_llvm = c_char_p(0)
 buf = create_string_buffer(modtext.encode("ascii"))
 
-print(hlc.HLC_Optimize(buf, byref(out)))
+print(hlc.HLC_Optimize(buf, byref(opt_llvm)))
 
-print(out.value.decode("ascii"))
+print(opt_llvm.value.decode("ascii"))
+
+emit_hsail = c_char_p(0)
+print(hlc.HLC_EmitHSAIL(opt_llvm, byref(emit_hsail)))
+
+print(emit_hsail.value.decode("ascii"))
 
 hlc.HLC_Finalize()
 
