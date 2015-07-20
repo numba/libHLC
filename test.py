@@ -18,7 +18,7 @@ module = hlc.HLC_ParseModule(buf)
 hlc.HLC_ModulePrint(module, byref(opt_llvm))
 print(opt_llvm.value.decode('ascii'))
 
-hlc.HLC_ModuleOptimize(module)
+hlc.HLC_ModuleOptimize(module, 3, 0, 1)
 
 hlc.HLC_ModulePrint(module, byref(opt_llvm))
 print(opt_llvm.value.decode('ascii'))
@@ -38,13 +38,13 @@ empty = hlc.HLC_ParseModule(bufempty)
 hlc.HLC_ModuleLinkIn(empty, module)
 
 hsail = c_char_p(0)
-hlc.HLC_ModuleEmitHSAIL(empty, byref(hsail))
+hlc.HLC_ModuleEmitHSAIL(empty, 3, byref(hsail))
 print(hsail.value.decode('ascii'))
 
 brigptr = c_void_p(0)
 
 hlc.HLC_ModuleEmitBRIG.restype = c_size_t
-size = hlc.HLC_ModuleEmitBRIG(empty, byref(brigptr))
+size = hlc.HLC_ModuleEmitBRIG(empty, 3, byref(brigptr))
 print(size)
 brig = (c_byte * size).from_address(brigptr.value)
 print(bytes(brig))

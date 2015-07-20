@@ -80,14 +80,6 @@ bool StripDebug = false;
 bool DisableOptimizations = false;
 bool DisableSimplifyLibCalls = false;
 
-bool OptLevelO1 = false;
-bool OptLevelO2 = false;
-bool OptLevelO3 = true;
-bool OptLevelOz = false;
-bool OptLevelOs = false;
-bool NoVerify = false;
-
-
 class ModuleRef {
 public:
   ModuleRef(Module * module) : M(module) { }
@@ -130,14 +122,17 @@ private:
   Module* M;
 };
 
-CodeGenOpt::Level GetCodeGenOptLevel() {
-  if (OptLevelO1)
+CodeGenOpt::Level GetCodeGenOptLevel(int OptLevel) {
+  switch (OptLevel) {
+  case 1:
     return CodeGenOpt::Less;
-  if (OptLevelO2)
+  case 2:
     return CodeGenOpt::Default;
-  if (OptLevelO3)
+  case 3:
     return CodeGenOpt::Aggressive;
-  return CodeGenOpt::None;
+  default:
+    return CodeGenOpt::None;
+  }
 }
 
 //// Borrowed from LLVM opt.cpp
@@ -183,7 +178,7 @@ static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
 
 
 // Returns the TargetMachine instance or zero if no triple is provided.
-static TargetMachine* GetTargetMachine(Triple TheTriple) {
+static TargetMachine* GetTargetMachine(Triple TheTriple, int OptLevel) {
   std::string Error;
   const Target *TheTarget = TargetRegistry::lookupTarget(MArch, TheTriple,
                                                          Error);
@@ -205,7 +200,7 @@ static TargetMachine* GetTargetMachine(Triple TheTriple) {
                                         MCPU, FeaturesStr,
                                         InitTargetOptionsFromCodeGenFlags(),
                                         RelocModel, CMModel,
-                                        GetCodeGenOptLevel());
+                                        GetCodeGenOptLevel(OptLevel));
 }
 
 
@@ -264,7 +259,7 @@ void Finalize() {
   llvm_shutdown();
 }
 
-void Optimize(llvm::Module *M) {
+void Optimize(llvm::Module *M, int OptLevel, int SizeLevel, int Verify) {
 
     // Create a PassManager to hold and optimize the collection of passes we are
     // about to build.
@@ -287,7 +282,7 @@ void Optimize(llvm::Module *M) {
     Triple ModuleTriple(M->getTargetTriple());
     TargetMachine *Machine = nullptr;
     if (ModuleTriple.getArch())
-      Machine = GetTargetMachine(Triple(ModuleTriple));
+      Machine = GetTargetMachine(Triple(ModuleTriple), OptLevel);
     std::unique_ptr<TargetMachine> TM(Machine);
 
     // Add internal analysis passes from the target machine.
@@ -295,7 +290,7 @@ void Optimize(llvm::Module *M) {
       TM->addAnalysisPasses(Passes);
 
     std::unique_ptr<FunctionPassManager> FPasses;
-    if (OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz || OptLevelO3) {
+    if (OptLevel > 0 || SizeLevel > 0) {
       FPasses.reset(new FunctionPassManager(M));
       if (DL)
         FPasses->add(new DataLayoutPass());
@@ -303,27 +298,10 @@ void Optimize(llvm::Module *M) {
         TM->addAnalysisPasses(*FPasses);
 
     }
-    //
-    // // If the -strip-debug command line option was specified, add it.
-    // if (StripDebug)
-    //   addPass(Passes, createStripSymbolsPass(true));
 
-    if (OptLevelO1)
-      AddOptimizationPasses(Passes, *FPasses, 1, 0);
+    AddOptimizationPasses(Passes, *FPasses, OptLevel, SizeLevel);
 
-    if (OptLevelO2)
-      AddOptimizationPasses(Passes, *FPasses, 2, 0);
-
-    if (OptLevelOs)
-      AddOptimizationPasses(Passes, *FPasses, 2, 1);
-
-    if (OptLevelOz)
-      AddOptimizationPasses(Passes, *FPasses, 2, 2);
-
-    if (OptLevelO3)
-      AddOptimizationPasses(Passes, *FPasses, 3, 0);
-
-    if (OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz || OptLevelO3) {
+    if (OptLevel > 0 || SizeLevel > 0) {
       FPasses->doInitialization();
       for (Module::iterator F = M->begin(), E = M->end(); F != E; ++F)
         FPasses->run(*F);
@@ -331,7 +309,7 @@ void Optimize(llvm::Module *M) {
     }
 
     // Check that the module is well formed on completion of optimization
-    if (!NoVerify) {
+    if (Verify) {
       Passes.add(createVerifierPass());
       Passes.add(createDebugInfoVerifierPass());
     }
@@ -340,13 +318,11 @@ void Optimize(llvm::Module *M) {
     Passes.run(*M);
 }
 
-static const int OptLevel = 2;
 static const std::string MArch = "hsail64";
 
 // The following function is adapted from llc.cpp
-int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG) {
-
-  // LLVMContext &Context = *TheContext;
+int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG,
+                  int OptLevel) {
   // Load the module to be compiled...
   SMDiagnostic Err;
 
@@ -368,12 +344,6 @@ int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG) {
 
   // Package up features to be passed to target/subtarget
   std::string FeaturesStr;
-  // if (MAttrs.size()) {
-  //   SubtargetFeatures Features;
-  //   for (unsigned i = 0; i != MAttrs.size(); ++i)
-  //     Features.AddFeature(MAttrs[i]);
-  //   FeaturesStr = Features.getString();
-  // }
 
   CodeGenOpt::Level OLvl = CodeGenOpt::Default;
 
@@ -385,11 +355,6 @@ int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG) {
   }
 
   TargetOptions Options;
-  // TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
-  // Options.DisableIntegratedAS = NoIntegratedAssembler;
-  // Options.MCOptions.ShowMCEncoding = ShowMCEncoding;
-  // Options.MCOptions.MCUseDwarfDirectory = EnableDwarfDirectory;
-  // Options.MCOptions.AsmVerbose = AsmVerbose;
 
   std::unique_ptr<TargetMachine> target(
       TheTarget->createTargetMachine(TheTriple.getTriple(), MCPU, FeaturesStr,
@@ -400,11 +365,6 @@ int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG) {
 
   if (GenerateSoftFloatCalls)
     FloatABIForCalls = FloatABI::Soft;
-
-  // // Figure out where we are going to send the output.
-  // std::unique_ptr<tool_output_file> Out(
-  //     GetOutputStream(TheTarget->getName(), TheTriple.getOS(), argv[0]));
-  // if (!Out) return 1;
 
   // Build up all of the passes that we want to do to the module.
   PassManager PM;
@@ -424,35 +384,10 @@ int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG) {
                    ? TargetMachine::CGFT_ObjectFile
                    : TargetMachine::CGFT_AssemblyFile);
 
-  // if (RelaxAll.getNumOccurrences() > 0 &&
-  //     FileType != TargetMachine::CGFT_ObjectFile)
-  //   errs() << argv[0]
-  //            << ": warning: ignoring -mc-relax-all because filetype != obj";
-  //
-  // {
   formatted_raw_ostream FOS(os);
-    //
-    // AnalysisID StartAfterID = nullptr;
-    // AnalysisID StopAfterID = nullptr;
-    // const PassRegistry *PR = PassRegistry::getPassRegistry();
-    // if (!StartAfter.empty()) {
-    //   const PassInfo *PI = PR->getPassInfo(StartAfter);
-    //   if (!PI) {
-    //     errs() << argv[0] << ": start-after pass is not registered.\n";
-    //     return 1;
-    //   }
-    //   StartAfterID = PI->getTypeInfo();
-    // }
-    // if (!StopAfter.empty()) {
-    //   const PassInfo *PI = PR->getPassInfo(StopAfter);
-    //   if (!PI) {
-    //     errs() << argv[0] << ": stop-after pass is not registered.\n";
-    //     return 1;
-    //   }
-    //   StopAfterID = PI->getTypeInfo();
-    // }
 
-    // Ask the target to add backend passes as necessary.
+  // Ask the target to add backend passes as necessary.
+  bool NoVerify = true;
   if (Target.addPassesToEmitFile(PM, FOS, FileType, NoVerify)) {
     errs() << "target does not support generation of this"
            << " file type!\n";
@@ -460,10 +395,6 @@ int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG) {
   }
 
   PM.run(*mod);
-  // }
-
-  // Declare success.
-  // Out->keep();
 
   return 1;
 }
@@ -506,31 +437,36 @@ void HLC_ModuleDestroy(ModuleRef *M) {
   delete M;
 }
 
-void HLC_ModuleOptimize(ModuleRef *M) {
-  Optimize(M->get());
+int HLC_ModuleOptimize(ModuleRef *M, int OptLevel, int SizeLevel, int Verify) {
+  if (OptLevel < 0 && OptLevel > 3) return 0;
+  if (SizeLevel < 0 && SizeLevel > 2) return 0;
+  Optimize(M->get(), OptLevel, SizeLevel, Verify);
+  return 1;
 }
 
 int HLC_ModuleLinkIn(ModuleRef *Dst, ModuleRef *Src) {
-    return !llvm::Linker::LinkModules(Dst->get(), Src->get());
+  return !llvm::Linker::LinkModules(Dst->get(), Src->get());
 }
 
 
-int HLC_ModuleEmitHSAIL(ModuleRef *M, char **output) {
-    // Compile
-    std::string buf;
-    raw_string_ostream os(buf);
-    if (!CompileModule(M->get(), os, false)) return 0;
-    // Write output
-    os.flush();
-    *output = HLC_CreateString(buf.c_str());
-    return 1;
-}
-
-size_t HLC_ModuleEmitBRIG(ModuleRef *M, char **output) {
+int HLC_ModuleEmitHSAIL(ModuleRef *M, int OptLevel, char **output) {
+  if (OptLevel < 0 && OptLevel > 3) return 0;
   // Compile
   std::string buf;
   raw_string_ostream os(buf);
-  if (!CompileModule(M->get(), os, true)) return 0;
+  if (!CompileModule(M->get(), os, false, OptLevel)) return 0;
+  // Write output
+  os.flush();
+  *output = HLC_CreateString(buf.c_str());
+  return 1;
+}
+
+size_t HLC_ModuleEmitBRIG(ModuleRef *M, int OptLevel, char **output) {
+  if (OptLevel < 0 && OptLevel > 3) return 0;
+  // Compile
+  std::string buf;
+  raw_string_ostream os(buf);
+  if (!CompileModule(M->get(), os, true, OptLevel)) return 0;
   // Write output
   os.flush();
   *output = (char*)malloc(buf.size());
