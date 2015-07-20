@@ -26,45 +26,23 @@
 #include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
-
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/RegionPass.h"
 #include "llvm/Bitcode/BitcodeWriterPass.h"
-#include "llvm/CodeGen/CommandFlags.h"
-#include "llvm/IR/DataLayout.h"
-#include "llvm/IR/IRPrintingPasses.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassNameParser.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/IRReader/IRReader.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/LinkAllIR.h"
 #include "llvm/LinkAllPasses.h"
-#include "llvm/MC/SubtargetFeature.h"
-#include "llvm/PassManager.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/PluginLoader.h"
-#include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/SystemUtils.h"
-#include "llvm/Support/TargetRegistry.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/Support/ToolOutputFile.h"
-#include "llvm/Target/TargetLibraryInfo.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
-
 #include "llvm/AsmParser/Parser.h"
-
 #include "llvm/Linker/Linker.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
+#include "llvm/Bitcode/ReaderWriter.h"
 
 #include <iostream>
 
@@ -103,20 +81,26 @@ public:
       return buf;
   }
 
-
-    static ModuleRef parse(const char* Asm) {
+    static ModuleRef* parseAssembly(const char* Asm) {
       SMDiagnostic SM;
       Module* M = parseAssemblyString(Asm, SM, *TheContext).release();
-      if (!M) return 0;
-      return ModuleRef(M);
-    }
-
-    static ModuleRef* parseNew(const char* Asm) {
-      SMDiagnostic SM;
-      Module* M = parseAssemblyString(Asm, SM, *TheContext).release();
-      if (!M) return 0;
+      if (!M) return nullptr;
       return new ModuleRef(M);
     }
+
+    static ModuleRef* parseBitcode(const char *Bitcode, size_t Len) {
+      auto buf = MemoryBuffer::getMemBuffer(StringRef(Bitcode, Len),
+                                            "", false);
+      ErrorOr<Module *> ModuleOrErr =
+            parseBitcodeFile(buf->getMemBufferRef(), *TheContext);
+      if (std::error_code EC = ModuleOrErr.getError()) {
+        puts(EC.message().c_str());
+        return nullptr;
+      }
+
+      ModuleOrErr.get()->materializeAll();
+      return new ModuleRef(ModuleOrErr.get());
+  }
 
 private:
   Module* M;
@@ -425,8 +409,16 @@ void HLC_DisposeString(char *str) {
 }
 
 ModuleRef* HLC_ParseModule(const char *Asm) {
-  return ModuleRef::parseNew(Asm);
+  return ModuleRef::parseAssembly(Asm);
 }
+
+ModuleRef* HLC_ParseBitcode(const char *Asm, size_t Len) {
+  return ModuleRef::parseBitcode(Asm, Len);
+}
+
+// ModuleRef* HLC_ParseBitcodeFile(const char *Asm, size_t Len) {
+  // return ModuleRef::parseBitcode(Asm, Len);
+// }
 
 void HLC_ModulePrint(ModuleRef *M, char **output) {
   *output = HLC_CreateString(M->to_string().c_str());
