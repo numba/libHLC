@@ -387,8 +387,8 @@ int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG,
   formatted_raw_ostream FOS(os);
 
   // Ask the target to add backend passes as necessary.
-  bool NoVerify = true;
-  if (Target.addPassesToEmitFile(PM, FOS, FileType, NoVerify)) {
+  bool Verify = false;
+  if (Target.addPassesToEmitFile(PM, FOS, FileType, Verify)) {
     errs() << "target does not support generation of this"
            << " file type!\n";
     return 0;
