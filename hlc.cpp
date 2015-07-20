@@ -62,6 +62,12 @@
 
 #include "llvm/AsmParser/Parser.h"
 
+#include "llvm/Linker/Linker.h"
+#include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/DiagnosticPrinter.h"
+
+#include <iostream>
+
 namespace libHLC {
 
 static llvm::LLVMContext *TheContext = nullptr;
@@ -417,7 +423,6 @@ int CompileModule(Module *mod, raw_string_ostream &os) {
   return 1;
 }
 
-
 } // end libHLC namespace
 
 extern "C" {
@@ -470,7 +475,7 @@ int HLC_EmitHSAIL(const char *ir_module, const char **output_str) {
     using namespace llvm;
 
     // Parse assembly string
-    llvm::SMDiagnostic SM;
+    SMDiagnostic SM;
     std::unique_ptr<Module> M = parseAssemblyString(ir_module, SM, *TheContext);
     if (!M) return 0;
 
@@ -485,6 +490,36 @@ int HLC_EmitHSAIL(const char *ir_module, const char **output_str) {
     // Copy string for output
     *output_str = HLC_CreateString(buf.c_str());
     return 1;   // Successful
+}
+
+int HLC_LinkModules(const char *dst,
+                    const char *src,
+                    const char **output_str) {
+
+    using namespace llvm;
+
+    // Parse assembly string
+    SMDiagnostic SM;
+    std::unique_ptr<Module> MDst = parseAssemblyString(dst, SM, *TheContext);
+    if (!MDst) return 0;
+
+    std::unique_ptr<Module> MSrc = parseAssemblyString(src, SM, *TheContext);
+    if (!MSrc) return 0;
+
+    // Link
+    if ( Linker::LinkModules(MDst.get(), MSrc.get()) ) {
+      return 0;
+    }
+
+    // Write output
+    std::string buf;
+    raw_string_ostream os(buf);
+    MDst->print(os, nullptr);
+    os.flush();
+
+    // Copy string for output
+    *output_str = HLC_CreateString(buf.c_str());
+    return 1;
 }
 
 } // end extern "C"
