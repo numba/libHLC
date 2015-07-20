@@ -8,16 +8,21 @@ with open("test_input.ll") as fin:
     modtext = fin.read()
 
 # print(modtext)
-
+hlc.HLC_ParseModule.restype = c_void_p
 
 opt_llvm = c_char_p(0)
 buf = create_string_buffer(modtext.encode("ascii"))
 
+module = hlc.HLC_ParseModule(buf)
 
-# Emit Optimize
-print(hlc.HLC_Optimize(buf, byref(opt_llvm)))
+hlc.HLC_ModulePrint(module, byref(opt_llvm))
+print(opt_llvm.value.decode('ascii'))
 
-print(opt_llvm.value.decode("ascii"))
+hlc.HLC_ModuleOptimize(module)
+
+hlc.HLC_ModulePrint(module, byref(opt_llvm))
+print(opt_llvm.value.decode('ascii'))
+
 
 
 bufempty = create_string_buffer(r"""
@@ -28,19 +33,20 @@ target datalayout = "e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:
 
 """.encode("ascii"))
 
+empty = hlc.HLC_ParseModule(bufempty)
 
-linked_llvm = c_char_p(0)
+hlc.HLC_ModuleLinkIn(empty, module)
 
-hlc.HLC_LinkModules(opt_llvm, bufempty, byref(linked_llvm))
+hsail = c_char_p(0)
+hlc.HLC_ModuleEmitHSAIL(empty, byref(hsail))
+print(hsail.value.decode('ascii'))
 
-print(linked_llvm.value.decode("ascii"))
+brigptr = c_void_p(0)
 
-# Emit HSAIL
-emit_hsail = c_char_p(0)
-print(hlc.HLC_EmitHSAIL(opt_llvm, byref(emit_hsail)))
+hlc.HLC_ModuleEmitBRIG.restype = c_size_t
+size = hlc.HLC_ModuleEmitBRIG(empty, byref(brigptr))
+print(size)
+brig = (c_byte * size).from_address(brigptr.value)
+print(bytes(brig))
 
-print(emit_hsail.value.decode("ascii"))
-
-hlc.HLC_Finalize()
-
-print("ok")
+print('ok')

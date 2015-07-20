@@ -87,6 +87,49 @@ bool OptLevelOz = false;
 bool OptLevelOs = false;
 bool NoVerify = false;
 
+
+class ModuleRef {
+public:
+  ModuleRef(Module * module) : M(module) { }
+
+  operator bool () const {
+    return M != nullptr;
+  }
+
+  Module * get() { return M; }
+
+  void destroy() {
+    delete M;
+    M = nullptr;
+  }
+
+  std::string to_string() {
+      std::string buf;
+      raw_string_ostream os(buf);
+      M->print(os, nullptr);
+      os.flush();
+      return buf;
+  }
+
+
+    static ModuleRef parse(const char* Asm) {
+      SMDiagnostic SM;
+      Module* M = parseAssemblyString(Asm, SM, *TheContext).release();
+      if (!M) return 0;
+      return ModuleRef(M);
+    }
+
+    static ModuleRef* parseNew(const char* Asm) {
+      SMDiagnostic SM;
+      Module* M = parseAssemblyString(Asm, SM, *TheContext).release();
+      if (!M) return 0;
+      return new ModuleRef(M);
+    }
+
+private:
+  Module* M;
+};
+
 CodeGenOpt::Level GetCodeGenOptLevel() {
   if (OptLevelO1)
     return CodeGenOpt::Less;
@@ -301,7 +344,7 @@ static const int OptLevel = 2;
 static const std::string MArch = "hsail64";
 
 // The following function is adapted from llc.cpp
-int CompileModule(Module *mod, raw_string_ostream &os) {
+int CompileModule(Module *mod, raw_string_ostream &os, bool emitBRIG) {
 
   // LLVMContext &Context = *TheContext;
   // Load the module to be compiled...
@@ -377,7 +420,9 @@ int CompileModule(Module *mod, raw_string_ostream &os) {
     mod->setDataLayout(DL);
   PM.add(new DataLayoutPass());
 
-  auto FileType = TargetMachine::CGFT_AssemblyFile;
+  auto FileType = (emitBRIG
+                   ? TargetMachine::CGFT_ObjectFile
+                   : TargetMachine::CGFT_AssemblyFile);
 
   // if (RelaxAll.getNumOccurrences() > 0 &&
   //     FileType != TargetMachine::CGFT_ObjectFile)
@@ -436,11 +481,11 @@ void HLC_Initialize() {
 }
 
 void HLC_Finalize() {
-  Initialize();
+  Finalize();
 }
 
 
-const char* HLC_CreateString(const char *str) {
+char* HLC_CreateString(const char *str) {
     return strdup(str);
 }
 
@@ -448,78 +493,50 @@ void HLC_DisposeString(char *str) {
   free(str);
 }
 
-int HLC_Optimize(const char* ir_module, const char **output_str) {
-  using namespace llvm;
-
-  // Parse assembly string
-  llvm::SMDiagnostic SM;
-  std::unique_ptr<Module> M = parseAssemblyString(ir_module, SM, *TheContext);
-  if (!M) return 0;
-
-  // Optimize
-  Optimize(M.get());
-
-  // Write output
-  std::string buf;
-  raw_string_ostream os(buf);
-  M->print(os, nullptr);
-  os.flush();
-
-  // Copy string for output
-  *output_str = HLC_CreateString(buf.c_str());
-  return 1;   // Successful
+ModuleRef* HLC_ParseModule(const char *Asm) {
+  return ModuleRef::parseNew(Asm);
 }
 
-int HLC_EmitHSAIL(const char *ir_module, const char **output_str) {
+void HLC_ModulePrint(ModuleRef *M, char **output) {
+  *output = HLC_CreateString(M->to_string().c_str());
+}
 
-    using namespace llvm;
+void HLC_ModuleDestroy(ModuleRef *M) {
+  M->destroy();
+  delete M;
+}
 
-    // Parse assembly string
-    SMDiagnostic SM;
-    std::unique_ptr<Module> M = parseAssemblyString(ir_module, SM, *TheContext);
-    if (!M) return 0;
+void HLC_ModuleOptimize(ModuleRef *M) {
+  Optimize(M->get());
+}
 
+int HLC_ModuleLinkIn(ModuleRef *Dst, ModuleRef *Src) {
+    return !llvm::Linker::LinkModules(Dst->get(), Src->get());
+}
+
+
+int HLC_ModuleEmitHSAIL(ModuleRef *M, char **output) {
     // Compile
     std::string buf;
     raw_string_ostream os(buf);
-    if (!CompileModule(M.get(), os)) return 0;
-
+    if (!CompileModule(M->get(), os, false)) return 0;
     // Write output
     os.flush();
-
-    // Copy string for output
-    *output_str = HLC_CreateString(buf.c_str());
-    return 1;   // Successful
-}
-
-int HLC_LinkModules(const char *dst,
-                    const char *src,
-                    const char **output_str) {
-
-    using namespace llvm;
-
-    // Parse assembly string
-    SMDiagnostic SM;
-    std::unique_ptr<Module> MDst = parseAssemblyString(dst, SM, *TheContext);
-    if (!MDst) return 0;
-
-    std::unique_ptr<Module> MSrc = parseAssemblyString(src, SM, *TheContext);
-    if (!MSrc) return 0;
-
-    // Link
-    if ( Linker::LinkModules(MDst.get(), MSrc.get()) ) {
-      return 0;
-    }
-
-    // Write output
-    std::string buf;
-    raw_string_ostream os(buf);
-    MDst->print(os, nullptr);
-    os.flush();
-
-    // Copy string for output
-    *output_str = HLC_CreateString(buf.c_str());
+    *output = HLC_CreateString(buf.c_str());
     return 1;
 }
+
+size_t HLC_ModuleEmitBRIG(ModuleRef *M, char **output) {
+  // Compile
+  std::string buf;
+  raw_string_ostream os(buf);
+  if (!CompileModule(M->get(), os, true)) return 0;
+  // Write output
+  os.flush();
+  *output = (char*)malloc(buf.size());
+  memcpy(*output, buf.data(), buf.size());
+  return buf.size();
+}
+
 
 } // end extern "C"
