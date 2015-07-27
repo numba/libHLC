@@ -1,0 +1,10 @@
+package:
+    name: libhlc
+    version: "0.1"
+
+source:
+    path: ..
+
+build:
+    number: 1
+
