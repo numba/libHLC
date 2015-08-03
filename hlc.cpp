@@ -51,7 +51,7 @@ namespace libHLC {
 static llvm::LLVMContext *TheContext = nullptr;
 
 bool DisableInline = false;
-bool UnitAtATime = false;
+bool UnitAtATime = true;
 bool DisableLoopVectorization = false;
 bool DisableSLPVectorization = false;
 bool StripDebug = false;
