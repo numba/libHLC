@@ -197,8 +197,7 @@ void Initialize() {
   }
 
   sys::PrintStackTraceOnErrorSignal();
-  static const char* argv[1] = {"libHLC"};
-  PrettyStackTraceProgram _(1, argv);
+  EnablePrettyStackTrace();
 
   // Enable debug stream buffering.
   EnableDebugBuffering = true;
