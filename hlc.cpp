@@ -465,5 +465,8 @@ size_t HLC_ModuleEmitBRIG(ModuleRef *M, int OptLevel, char **output) {
   return buf.size();
 }
 
+void HLC_SetCommandLineOption(int argc, const char * const * argv){
+   llvm::cl::ParseCommandLineOptions(argc, argv, nullptr);
+}
 
 } // end extern "C"
