@@ -1,13 +1,14 @@
 package:
     name: libhlc
-    version: "0.1"
+    version: "0.2"
 
 source:
     path: ..
 
 build:
-    number: 6
-
+    number: 0
+    script_env:
+        - LLVMCONFIG
 about:
     home: https://github.com/numba/libHLC
     license: BSD
